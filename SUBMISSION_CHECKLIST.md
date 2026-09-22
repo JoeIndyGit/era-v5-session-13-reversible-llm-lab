@@ -1,50 +1,18 @@
-# Submission Checklist
+# Submission checklist
 
-## Pre-flight
-- [ ] GPU runtime enabled.
-- [ ] `python scripts/validate.py` passes Midpoint **and** Leapfrog gates.
-- [ ] `results/environment.txt` captured.
-- [ ] `dataset_meta.json` contains tokenizer + train + validation SHA-256 hashes.
+- [ ] Full-depth CUDA/precision gates pass for the selected reversible variant.
+- [ ] Midpoint/leapfrog pilot evidence explains the variant decision before required reversible training.
+- [ ] Baseline completes exactly 50,000,000 successful-update target tokens.
+- [ ] Reversible fixed-batch run completes exactly 50,000,000 tokens at the same batch.
+- [ ] Capacity probes show an adjacent passing/failing memory boundary, with at least 10 successful updates at the passing batch.
+- [ ] Reversible maximum-batch run uses the measured batch and completes exactly 50,000,000 tokens.
+- [ ] Runs share model sizes, data, seed, optimizer, GPU type, software versions and precision.
+- [ ] Final losses, perplexity, median/aggregate tokens/s and allocated/reserved peaks match the step logs.
+- [ ] Reconstruction is checked at full depth and actual training precision after training.
+- [ ] Executed notebooks contain real outputs, no errors, and match their source notebooks.
+- [ ] README contains measured tables, six figures, qualitative examples and interpretation/limitations.
+- [ ] `python scripts/audit_results.py` passes.
+- [ ] `python scripts/package_evidence.py` produces the evidence ZIP and SHA-256 manifest.
+- [ ] Measured results, generated figures, README and executed notebooks are committed to GitHub.
 
-## Variant selection
-- [ ] Run `00b_variant_selection.ipynb`.
-- [ ] `results/variant_selection.json` contains both candidates.
-- [ ] `results/selected_variant.json` exists **before** required reversible 50M runs.
-
-## Required 50M evidence
-- [ ] `baseline_fixed.json` + CSV.
-- [ ] `reversible_fixed.json` + CSV.
-- [ ] `baseline_batch_probe.json`.
-- [ ] `reversible_batch_probe.json`.
-- [ ] Both probes use `trial_steps: 10`.
-- [ ] Both searches have an observed failure bracket (`search_complete: true`).
-- [ ] `reversible_max_batch.json` + CSV.
-- [ ] Every required run reports exactly `tokens_seen = 50,000,000`.
-
-## Final report
-- [ ] `python scripts/audit_results.py` reports **PASS**.
-- [ ] Run notebook 04.
-- [ ] README no longer contains result placeholders.
-- [ ] `executive_summary.png` exists.
-- [ ] Loss, memory, throughput, quality-memory, and batch-frontier plots exist.
-- [ ] Variant-selection and batch-frontier tables are populated.
-- [ ] Allocated + reserved memory, validation loss/PPL, tok/s, reconstruction error are visible.
-- [ ] Qualitative top-1 completions are present or a recorded reason explains their absence.
-
-## Optional research bonus
-- [ ] Run notebook 05 and preserve `baseline_matched_effective_batch.json` if compute budget permits.
-
-## GitHub
-- [ ] All notebooks committed.
-- [ ] Source/config/scripts committed.
-- [ ] Raw result JSON/CSV + environment + generated assets committed.
-- [ ] GitHub Actions validate passes.
-- [ ] README images render.
-- [ ] Submit the repository/README link.
-
-## Final evidence bundle
-- [ ] Run `python scripts/package_evidence.py` only after the final audit passes.
-- [ ] `submission_evidence/MANIFEST.json` exists.
-- [ ] `submission_evidence/era-v5-session-13-evidence.zip` exists.
-- [ ] Preserve the printed ZIP SHA-256 alongside the submitted artifact.
-- [ ] Verify the bundle excludes `data/` caches and temporary checkpoints.
+The optional matched-effective-batch control is useful additional analysis; it is not required for the three-run assignment.

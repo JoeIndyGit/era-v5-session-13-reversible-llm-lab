@@ -6,14 +6,21 @@ on:
 jobs:
   correctness:
     runs-on: ubuntu-latest
+    env:
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install validation dependencies
-        run: pip install torch numpy
+      - name: Install CPU correctness dependencies
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install numpy pandas matplotlib nbformat nbclient ipykernel
       - name: Validate repository structure
         run: python scripts/validate_repo_structure.py
       - name: Validate reversible mathematics and token accounting
         run: python scripts/validate.py
+      - name: Verify recovery, overflow accounting, evidence audit and notebook failure handling
+        run: python -m unittest discover -s tests -v

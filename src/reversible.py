@@ -228,6 +228,10 @@ def _error_report(states, reconstructed):
     errors = [(a.float() - b.float()).abs().max().item() for a, b in zip(states, reconstructed)]
     return {
         "max_abs_error": max(errors),
+        "max_relative_l2_error": max(
+            ((a.float() - b.float()).norm() / a.float().norm().clamp_min(1e-12)).item()
+            for a, b in zip(states, reconstructed)
+        ),
         "mean_layer_max_abs_error": sum(errors) / len(errors),
         "per_state_max_abs_error": errors,
     }

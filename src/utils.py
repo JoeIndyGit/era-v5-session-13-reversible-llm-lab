@@ -40,12 +40,17 @@ def device_info():
     return info
 
 
-def choose_precision(device):
-    if device.type == "cuda":
-        if torch.cuda.is_bf16_supported():
-            return torch.bfloat16, False, "bf16"
-        return torch.float16, True, "fp16"
-    return torch.float32, False, "fp32-cpu"
+def choose_precision(device, requested="auto"):
+    if device.type != "cuda":
+        return torch.float32, False, "fp32-cpu"
+    if requested == "auto":
+        requested = "bf16" if torch.cuda.is_bf16_supported() else "fp16"
+    if requested == "bf16" and not torch.cuda.is_bf16_supported():
+        raise ValueError("This GPU does not support bf16; choose fp16 or fp32 for all runs.")
+    dtypes = {"fp32": torch.float32, "fp16": torch.float16, "bf16": torch.bfloat16}
+    if requested not in dtypes:
+        raise ValueError(f"Unknown precision: {requested}")
+    return dtypes[requested], requested == "fp16", requested
 
 
 def cuda_sync():

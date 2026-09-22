@@ -1,123 +1,48 @@
-# Colab Execution Runbook
+# Colab execution and recovery
 
-This is the shortest reliable path from a blank Colab runtime to a submission-complete Session 13 evidence bundle.
+## Start
 
-## 1. Open the canonical one-click notebook
+1. Open [notebook 06](https://colab.research.google.com/github/JoeIndyGit/era-v5-session-13-reversible-llm-lab/blob/main/notebooks/06_one_click_colab_submission.ipynb).
+2. Select **Runtime → Change runtime type → GPU**.
+3. Keep **PERSIST_TO_DRIVE = True**, authorize your own Drive mount, and run every cell.
+4. Keep the default fixed batch of 16 and precision `auto` unless the initial checks show that the hardware needs another choice. Select any alternative before starting the comparison.
 
-Use:
+The repository, checkpoints and measured output persist in `MyDrive/ERA_V5_S13/repository`. The approximately 106 MB of token arrays are read into host RAM for each training run, so training does not repeatedly sample random windows from Drive.
 
-`https://colab.research.google.com/github/JoeIndyGit/era-v5-session-13-reversible-llm-lab/blob/main/notebooks/06_one_click_colab_submission.ipynb`
+The runner executes the actual notebooks and writes outputs into `executed_notebooks/`. It performs full-depth GPU precision checks, two 2M-token variant pilots, three required 50M-token runs, both batch-capacity probes, the final audit, report generation and packaging.
 
-The notebook now **clones the repository itself**, so it does not assume that GitHub files already exist under `/content`.
+## If the runtime disconnects
 
-## 2. Select one GPU and keep it for the entire graded run
+Reconnect to the same GPU type with the same PyTorch/CUDA versions. Reopen notebook 06 and run its cells again with identical settings. The persisted repository remains at its original source commit while results/checkpoints exist. Completed artifacts are checked before reuse; incomplete training resumes at the most recent atomic checkpoint.
 
-In Colab:
+A checkpoint contains parameters, Adam state, gradient scaler, token/step counters, sampling state and Python/NumPy/Torch/CUDA RNG state. Work after the last checkpoint is replayed; it is not counted twice. At most 499 successful updates normally need replaying. The final update also creates a checkpoint.
 
-`Runtime → Change runtime type → GPU`
+A notebook kernel restart on the same retained runtime and a full Colab runtime replacement are different events. Drive preserves files across both; an unmounted temporary `/content` checkout does not survive a full runtime replacement.
 
-The assignment compares throughput and CUDA peak memory. Do not intentionally move the three required runs across different GPU types.
+If source, data, precision or hardware changes, the pipeline rejects reuse. Preserve the existing experiment folder and create a fresh checkout/output folder for the new comparison. Do not combine its throughput/memory figures with previous hardware results.
 
-The final evidence audit checks GPU name, total GPU memory, CUDA/PyTorch version, precision, dataset hashes, and the Git commit recorded by every required run.
+## Numerical or memory failures
 
-## 3. Run notebook 06 top-to-bottom
+A failed mixed-precision correctness gate stops the run before the pilots. If neither candidate passes, use `PRECISION = 'fp32'` for all three runs in a **fresh experiment folder**. If the fixed batch cannot fit, similarly select a smaller fixed batch before running a new comparison.
 
-The orchestrator executes:
+The maximum-batch search needs an observed memory failure or the declared 96% allocator limit immediately above its passing batch. A numerical failure is not a capacity result. If a search hits its safety cap, increase the cap deliberately in a fresh capacity measurement; do not report the lower bound as a measured maximum.
 
-```text
-correctness validation
-        ↓
-environment capture
-        ↓
-TinyStories 10K BPE + 52M/1M token caches
-        ↓
-Midpoint vs Leapfrog 2M-token selection pilot
-        ↓
-baseline fixed-batch — exactly 50M tokens
-        ↓
-selected reversible fixed-batch — exactly 50M tokens
-        ↓
-baseline 10-update batch frontier
-        ↓
-reversible 10-update batch frontier
-        ↓
-selected reversible max-batch — exactly 50M tokens
-        ↓
-final evidence audit
-        ↓
-README tables + figures
-        ↓
-evidence ZIP + SHA-256 manifest
-```
+## Completion
 
-The main command is:
-
-```bash
-python scripts/run_full_submission.py
-```
-
-## 4. Do not call a capped search a maximum
-
-Both baseline and reversible batch searches must end with an **observed failing batch** above the largest passing batch.
-
-The final report therefore uses the precise wording:
-
-> maximum memory-feasible batch under the 10-update probe rule
-
-If a search reaches its safety cap without observing failure, the orchestrator stops rather than overclaiming a maximum.
-
-## 5. Completion gate
-
-The run is complete only when these messages appear:
+The final console must contain:
 
 ```text
 FINAL EVIDENCE AUDIT: PASS
-COMPLETE: required evidence is in results/, figures in assets/, README is populated.
+COMPLETE: measured results, figures, README, executed notebooks and evidence ZIP are ready.
 ```
 
-Then run:
+The ZIP is `submission_evidence/era-v5-session-13-evidence.zip`; `MANIFEST.json` lists the SHA-256 hashes of its contents. The bundle includes the tokenizer and dataset metadata but excludes token arrays and training checkpoints.
 
-```bash
-python scripts/package_evidence.py
-```
-
-This must create:
-
-```text
-submission_evidence/
-├── MANIFEST.json
-└── era-v5-session-13-evidence.zip
-```
-
-The manifest includes a SHA-256 digest for every packaged artifact.
-
-## 6. Preserve these files in GitHub
-
-Commit the generated:
+Commit these generated paths to the GitHub repository:
 
 - `README.md`
-- `results/*.json`
-- `results/*_steps.csv`
-- `results/environment.txt`
-- `assets/*.png`
-- executed notebooks, if desired for the class submission
+- `results/`, including pilot JSON/CSV, selected variant, capacity probes, GPU checks and environment
+- `assets/`
+- `executed_notebooks/`
 
-Do **not** commit the large `data/` cache or temporary checkpoints.
-
-## 7. Reviewer evidence hierarchy
-
-Use the README for the narrative. If a number is challenged, trace it to:
-
-```text
-README / figure
-      ↓
-result JSON
-      ↓
-step CSV or batch-probe JSON
-      ↓
-environment + dataset hashes
-      ↓
-Git commit
-```
-
-That makes the assignment auditable rather than screenshot-dependent.
+Use the README to present the findings and the CSV logs to verify every headline number. The grader should not need to rerun training merely to see the submitted measurements.

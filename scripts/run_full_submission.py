@@ -1,146 +1,87 @@
 #!/usr/bin/env python3
-from __future__ import annotations
-
+"""Execute the actual notebooks, preserving their real outputs after every cell."""
 from pathlib import Path
+from datetime import datetime, timezone
 import argparse
 import json
+import os
 import subprocess
 import sys
-import torch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-
-from src.data import prepare_tinystories_cache
-from src.model import ModelConfig
-from src.train import run_experiment, run_variant_selection, find_max_stable_batch
+NOTEBOOKS = ['00_setup_and_validation', '00b_variant_selection', '01_baseline_50m',
+             '02_reversible_fixed_batch_50m', '03_reversible_max_batch_50m', '04_analysis_and_report']
 
 
-def sh(*args: str) -> None:
-    subprocess.run(list(args), cwd=ROOT, check=True)
-
-
-def load_json(path: Path):
-    return json.loads(path.read_text())
-
-
-def write_json(path: Path, payload) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2))
-
-
-def require_cuda() -> None:
+def require_cuda():
+    import torch
     if not torch.cuda.is_available():
-        raise RuntimeError(
-            "CUDA is required for the graded runs. This runner refuses to generate "
-            "CPU-only speed/memory evidence because it would not satisfy the GPU experiment."
-        )
-    p = torch.cuda.get_device_properties(0)
-    print(f"GPU: {torch.cuda.get_device_name(0)} | {p.total_memory/1024**3:.2f} GiB")
+        raise RuntimeError('CUDA is required for the measured runs; CPU test outputs are never submission evidence.')
+    print(f'GPU: {torch.cuda.get_device_name(0)}', flush=True)
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--pilot-tokens", type=int, default=2_000_000)
-    ap.add_argument("--probe-steps", type=int, default=10)
-    ap.add_argument("--reserve-limit", type=float, default=0.96)
-    ap.add_argument("--force", action="store_true", help="rerun completed phases")
-    args = ap.parse_args()
+def execute_notebook(source, destination, cwd=ROOT):
+    import nbformat
+    import tempfile
+    from jupyter_client import AsyncKernelManager
+    from nbclient import NotebookClient
+    nb = nbformat.read(source, as_version=4)
+    for cell in nb.cells:
+        if cell.cell_type == 'code': cell.outputs = []; cell.execution_count = None
+    from src.evidence import sha256
+    nb.metadata['execution_record'] = {'started_utc': datetime.now(timezone.utc).isoformat(), 'status': 'running',
+                                       'source_notebook_sha256': sha256(source)}
+    destination = Path(destination); destination.parent.mkdir(parents=True, exist_ok=True)
+    def persist(**kwargs):
+        temp = destination.with_name(destination.name + '.tmp')
+        nbformat.write(nb, temp)
+        os.replace(temp, destination)
+    class StreamingClient(NotebookClient):
+        def process_message(self, msg, cell, cell_index):
+            result = super().process_message(msg, cell, cell_index)
+            if msg.get('msg_type') == 'stream':
+                print(msg['content'].get('text', ''), end='', flush=True)
+                persist()
+            return result
+    sockets = tempfile.TemporaryDirectory(prefix='era-s13-kernel-')
+    manager = AsyncKernelManager(kernel_name='python3', transport='ipc', ip=str(Path(sockets.name) / 'kernel'))
+    client = StreamingClient(nb, km=manager, timeout=None, kernel_name='python3', allow_errors=False,
+                            resources={'metadata': {'path': str(cwd)}}, on_cell_executed=persist)
+    try:
+        client.execute(cleanup_kc=True)
+        nb.metadata['execution_record']['status'] = 'completed'
+    except BaseException:
+        nb.metadata['execution_record']['status'] = 'failed'
+        raise
+    finally:
+        nb.metadata['execution_record']['finished_utc'] = datetime.now(timezone.utc).isoformat()
+        persist()
+        sockets.cleanup()
+    return destination
 
-    results = ROOT / "results"
-    results.mkdir(exist_ok=True)
-    (ROOT / "assets").mkdir(exist_ok=True)
 
+def main():
+    from src.evidence import atomic_json
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--precision', choices=['auto', 'fp32', 'fp16', 'bf16'], default='auto')
+    parser.add_argument('--batch-size', type=int, default=16)
+    args = parser.parse_args()
+    if args.batch_size < 1: raise ValueError('Batch size must be positive')
+    os.chdir(ROOT)
     require_cuda()
-
-    print("\n[0/6] Correctness + environment")
-    sh(sys.executable, "scripts/validate.py")
-    sh(sys.executable, "scripts/capture_environment.py")
-
-    print("\n[1/6] Dataset/tokenizer cache")
-    prepare_tinystories_cache(
-        out_dir=ROOT / "data",
-        train_tokens=52_000_000,
-        val_tokens=1_000_000,
-        vocab_size=10_000,
-        tokenizer_training_stories=100_000,
-    )
-
-    common = load_json(ROOT / "configs/common.json")
-    common["train_path"] = str(ROOT / common["train_path"])
-    common["val_path"] = str(ROOT / common["val_path"])
-    common["results_dir"] = str(results)
-
-    print("\n[2/6] Pre-registered reversible variant selection")
-    selected_path = results / "selected_variant.json"
-    if args.force or not selected_path.exists():
-        candidates = {
-            "midpoint": ModelConfig(**load_json(ROOT / "configs/model_midpoint.json")),
-            "leapfrog": ModelConfig(**load_json(ROOT / "configs/model_leapfrog.json")),
-        }
-        report = run_variant_selection(
-            common, candidates, pilot_tokens=args.pilot_tokens, results_dir=str(results)
-        )
-        print("Selected:", report["selected_variant"])
-    selected = load_json(selected_path)
-    selected_cfg = ModelConfig(**load_json(ROOT / selected["config_file"]))
-    baseline_cfg = ModelConfig(**load_json(ROOT / "configs/model_baseline.json"))
-
-    print("\n[3/6] Required fixed-batch 50M runs")
-    if args.force or not (results / "baseline_fixed.json").exists():
-        run_experiment(common, baseline_cfg, "baseline_fixed")
-    else:
-        print("SKIP baseline_fixed: authoritative JSON exists")
-
-    if args.force or not (results / "reversible_fixed.json").exists():
-        run_experiment(common, selected_cfg, "reversible_fixed")
-    else:
-        print("SKIP reversible_fixed: authoritative JSON exists")
-
-    print("\n[4/6] 10-update batch frontiers + reversible maximum-batch 50M run")
-    bp_path = results / "baseline_batch_probe.json"
-    rp_path = results / "reversible_batch_probe.json"
-
-    if args.force or not bp_path.exists():
-        bp = find_max_stable_batch(
-            common, baseline_cfg, start_batch=common["batch_size"],
-            trial_steps=args.probe_steps, reserve_limit=args.reserve_limit,
-        )
-        write_json(bp_path, bp)
-    else:
-        bp = load_json(bp_path)
-
-    if args.force or not rp_path.exists():
-        rp = find_max_stable_batch(
-            common, selected_cfg, start_batch=common["batch_size"],
-            trial_steps=args.probe_steps, reserve_limit=args.reserve_limit,
-        )
-        write_json(rp_path, rp)
-    else:
-        rp = load_json(rp_path)
-
-    if not bp.get("search_complete") or not rp.get("search_complete"):
-        raise RuntimeError(
-            "At least one batch search reached its safety cap without an observed failure. "
-            "Increase max_batch_cap before claiming a maximum."
-        )
-
-    max_batch = int(rp.get("largest_feasible_batch", rp["largest_stable_batch"]))
-    max_cfg = dict(common)
-    max_cfg["batch_size"] = max_batch
-    max_cfg["eval_batch_size"] = min(common["eval_batch_size"], max_batch)
-    if args.force or not (results / "reversible_max_batch.json").exists():
-        run_experiment(max_cfg, selected_cfg, "reversible_max_batch")
-    else:
-        print("SKIP reversible_max_batch: authoritative JSON exists")
-
-    print("\n[5/6] Final evidence audit")
-    sh(sys.executable, "scripts/audit_results.py")
-
-    print("\n[6/6] Render report + figures from measured evidence")
-    sh(sys.executable, "scripts/render_report.py")
-    print("\nCOMPLETE: required evidence is in results/, figures in assets/, README is populated.")
+    config_path = ROOT / 'results/execution_config.json'
+    overrides = {'precision': args.precision, 'batch_size': args.batch_size}
+    if config_path.exists() and json.loads(config_path.read_text()) != overrides:
+        raise RuntimeError('Execution settings changed. Preserve this experiment and use a fresh checkout for the new comparison.')
+    atomic_json(config_path, overrides)
+    os.environ['ERA_S13_CONFIG'] = str(config_path)
+    for number, name in enumerate(NOTEBOOKS, 1):
+        print(f'[{number}/{len(NOTEBOOKS)}] Executing {name}', flush=True)
+        execute_notebook(ROOT / 'notebooks' / f'{name}.ipynb', ROOT / 'executed_notebooks' / f'{name}.ipynb')
+    subprocess.run([sys.executable, 'scripts/audit_results.py'], cwd=ROOT, check=True)
+    subprocess.run([sys.executable, 'scripts/package_evidence.py'], cwd=ROOT, check=True)
+    print('COMPLETE: measured results, figures, README, executed notebooks and evidence ZIP are ready.', flush=True)
 
 
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__': main()

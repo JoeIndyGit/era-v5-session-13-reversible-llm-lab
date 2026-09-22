@@ -18,6 +18,7 @@ INCLUDE_ROOT_FILES = [
     "README.md",
     "EXPERIMENT_CARD.md",
     "SUBMISSION_CHECKLIST.md",
+    "COLAB_RUNBOOK.md",
     "requirements.txt",
 ]
 INCLUDE_DIRS = [
@@ -27,6 +28,8 @@ INCLUDE_DIRS = [
     "src",
     "scripts",
     "notebooks",
+    "executed_notebooks",
+    "tests",
     ".github/workflows",
 ]
 EXCLUDE_NAMES = {".gitkeep", "__pycache__", ".ipynb_checkpoints"}
@@ -84,19 +87,26 @@ def main():
         ROOT / "results" / "reversible_fixed.json",
         ROOT / "results" / "reversible_max_batch.json",
         ROOT / "results" / "variant_selection.json",
+        ROOT / "results" / "gpu_correctness.json",
+        ROOT / "executed_notebooks" / "04_analysis_and_report.ipynb",
         ROOT / "results" / "baseline_batch_probe.json",
         ROOT / "results" / "reversible_batch_probe.json",
         ROOT / "results" / "environment.txt",
         ROOT / "assets" / "executive_summary.png",
     ]
+    required.extend(ROOT / "assets" / name for name in ["loss_vs_tokens.png", "memory_comparison.png",
+                    "throughput_comparison.png", "quality_memory_frontier.png", "batch_capacity_frontier.png"])
     missing = [str(p.relative_to(ROOT)) for p in required if not p.exists()]
     if missing:
         raise SystemExit("Cannot package incomplete evidence. Missing: " + ", ".join(missing))
 
-    if OUT.exists():
-        shutil.rmtree(OUT)
-    OUT.mkdir(parents=True)
+    OUT.mkdir(parents=True, exist_ok=True)
 
+    # Preserve the small tokenizer and pinned dataset metadata, excluding token arrays.
+    repro = ROOT / "results" / "reproducibility"
+    repro.mkdir(parents=True, exist_ok=True)
+    for p in (ROOT / "data").glob("*.json"):
+        shutil.copy2(p, repro / p.name)
     files = eligible_files()
     manifest_files = []
     for p in files:

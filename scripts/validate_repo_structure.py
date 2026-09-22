@@ -19,6 +19,11 @@ REQUIRED = [
     "src/reversible.py",
     "src/train.py",
     "src/data.py",
+    "src/evidence.py",
+    "src/checkpointing.py",
+    "src/diagnostics.py",
+    "scripts/validate_gpu.py",
+    "tests/test_experiment.py",
     "scripts/validate.py",
     "scripts/audit_results.py",
     "scripts/render_report.py",
@@ -49,6 +54,11 @@ for p in (ROOT / "configs").glob("*.json"):
 for p in (ROOT / "notebooks").glob("*.ipynb"):
     try:
         nb = json.loads(p.read_text())
+        code_cells = [c for c in nb.get("cells", []) if c.get("cell_type") == "code"]
+        for cell in code_cells:
+            source = "".join(cell.get("source", []))
+            if any(line.lstrip().startswith("!") for line in source.splitlines()):
+                errors.append(f"{p.name}: shell command must propagate failure through check=True")
         if nb.get("nbformat") != 4:
             errors.append(f"{p.name}: expected nbformat 4")
         if not isinstance(nb.get("cells"), list) or not nb["cells"]:

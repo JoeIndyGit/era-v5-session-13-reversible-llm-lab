@@ -16,7 +16,7 @@ def _sha256(path, chunk_size=8 * 1024 * 1024):
     return h.hexdigest()
 
 
-def _train_tinystories_bpe(tokenizer_path, vocab_size=10_000, stories=100_000):
+def _train_tinystories_bpe(tokenizer_path, vocab_size=10_000, stories=100_000, revision=None):
     from datasets import load_dataset
     from tokenizers import Tokenizer
     from tokenizers.models import BPE
@@ -36,7 +36,7 @@ def _train_tinystories_bpe(tokenizer_path, vocab_size=10_000, stories=100_000):
         show_progress=True,
     )
 
-    ds = load_dataset("roneneldan/TinyStories", split="train", streaming=True)
+    ds = load_dataset("roneneldan/TinyStories", split="train", streaming=True, revision=revision)
 
     def iterator():
         for i, row in enumerate(ds):
@@ -74,12 +74,29 @@ def prepare_tinystories_cache(
     expected = [tokenizer_path, train_path, val_path, meta_path]
     if all(p.exists() for p in expected):
         meta = json.loads(meta_path.read_text())
-        if meta.get("vocab_size") == vocab_size:
-            return meta
+        if (meta.get("vocab_size") != vocab_size or meta.get("train_tokens") != train_tokens
+                or meta.get("val_tokens") != val_tokens or not meta.get("dataset_revision")):
+            raise RuntimeError("Existing data cache uses a different or unpinned protocol. Preserve it and use a fresh data directory.")
+        for name, path in [("tokenizer", tokenizer_path), ("train", train_path), ("val", val_path)]:
+            if _sha256(path) != meta.get(name + "_sha256"):
+                raise RuntimeError(f"Corrupted or modified {name} cache; recorded hashes do not match.")
+        return meta
+
+    from huggingface_hub import HfApi
+    reference_dir = Path(__file__).resolve().parents[1] / "results" / "reproducibility"
+    reference_path = reference_dir / "dataset_meta.json"
+    reference = json.loads(reference_path.read_text()) if reference_path.exists() else None
+    revision = reference["dataset_revision"] if reference else HfApi().dataset_info("roneneldan/TinyStories").sha
+    if reference and not tokenizer_path.exists():
+        import shutil
+        saved_tokenizer = reference_dir / Path(reference["tokenizer_path"]).name
+        if not saved_tokenizer.exists() or _sha256(saved_tokenizer) != reference["tokenizer_sha256"]:
+            raise RuntimeError("The preserved tokenizer is missing or has changed.")
+        shutil.copy2(saved_tokenizer, tokenizer_path)
 
     if not tokenizer_path.exists():
         tokenizer = _train_tinystories_bpe(
-            tokenizer_path, vocab_size=vocab_size, stories=tokenizer_training_stories
+            tokenizer_path, vocab_size=vocab_size, stories=tokenizer_training_stories, revision=revision
         )
     else:
         tokenizer = Tokenizer.from_file(str(tokenizer_path))
@@ -91,7 +108,7 @@ def prepare_tinystories_cache(
     def write_split(split, path, target):
         arr = np.memmap(path, dtype=np.uint16, mode="w+", shape=(target,))
         cursor = 0
-        ds = load_dataset("roneneldan/TinyStories", split=split, streaming=True)
+        ds = load_dataset("roneneldan/TinyStories", split=split, streaming=True, revision=revision)
         buf = []
 
         def flush(texts, cursor):
@@ -124,6 +141,7 @@ def prepare_tinystories_cache(
 
     meta = {
         "dataset": "roneneldan/TinyStories",
+        "dataset_revision": revision,
         "tokenizer": "custom ByteLevel BPE trained on TinyStories",
         "vocab_size": vocab_size,
         "tokenizer_training_stories": tokenizer_training_stories,
@@ -137,19 +155,26 @@ def prepare_tinystories_cache(
         "val_sha256": _sha256(val_path),
         "dtype": "uint16",
     }
+    if reference:
+        for field in ["tokenizer_sha256", "train_sha256", "val_sha256"]:
+            if meta[field] != reference[field]:
+                raise RuntimeError(f"Rebuilt data does not match the submitted {field}; check tokenizer/dataset dependency versions.")
     meta_path.write_text(json.dumps(meta, indent=2))
     return meta
 
 
 class TokenMemmap:
     def __init__(self, path, seq_len, device, seed=1337):
-        self.data = np.memmap(path, dtype=np.uint16, mode="r")
+        # 106 MB of training tokens fit in host RAM; avoid random Drive I/O during timing.
+        self.data = np.fromfile(path, dtype=np.uint16)
         self.seq_len = int(seq_len)
         self.device = device
         self.rng = np.random.default_rng(seed)
 
     def batch(self, batch_size, valid_target_tokens=None):
-        max_start = len(self.data) - self.seq_len - 1
+        max_start = len(self.data) - self.seq_len
+        if max_start <= 0:
+            raise ValueError("Token cache is shorter than one context plus its target.")
         starts = self.rng.integers(0, max_start, size=batch_size)
         x = np.stack([
             np.asarray(self.data[s:s+self.seq_len], dtype=np.int64)

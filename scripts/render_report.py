@@ -33,7 +33,11 @@ def plot_results(results, results_dir="results", assets_dir="assets"):
         if p.exists(): curves.append((n,pd.read_csv(p)))
     if curves:
         fig,ax=plt.subplots(figsize=(9,5))
-        for n,df in curves: ax.plot(df.tokens_seen/1e6,df.train_loss_100step_mean,label=_label(n))
+        for n,df in curves:
+            line, = ax.plot(df.tokens_seen/1e6,df.train_loss_100step_mean,label=_label(n)+" train")
+            val = df.dropna(subset=["val_loss"])
+            if not val.empty:
+                ax.plot(val.tokens_seen/1e6,val.val_loss,linestyle="--",marker=".",color=line.get_color(),label=_label(n)+" validation")
         ax.set(xlabel="Training tokens (millions)",ylabel="100-step mean cross-entropy",title="Training loss over the 50M-token budget"); ax.grid(alpha=.25); ax.legend(); fig.tight_layout(); fig.savefig(assets/'loss_vs_tokens.png',dpi=180); plt.close(fig)
     labels=[_label(n) for n in ORDER if n in results]
     for key,ylabel,title,file in [
@@ -105,10 +109,16 @@ def findings(results,results_dir="results"):
     b,r,m=[results[n] for n in ORDER];probes=load_probes(results_dir)
     speed=100*(r['median_tokens_per_s']/b['median_tokens_per_s']-1);maxspeed=100*(m['median_tokens_per_s']/b['median_tokens_per_s']-1);val=r['final_val_loss']-b['final_val_loss']
     mem_delta = 100 * (r['peak_allocated_gib'] / b['peak_allocated_gib'] - 1)
-    lines=[f"- At the same batch size, peak allocated memory changed by **{mem_delta:+.1f}%** for the selected reversible variant relative to baseline.",f"- Its same-batch recomputation/throughput delta was **{speed:+.1f}%**.",f"- At the maximum reversible batch, throughput changed by **{maxspeed:+.1f}%** relative to the fixed-batch baseline.",f"- Fixed-batch validation-loss delta was **{val:+.4f}** (reversible − baseline).",f"- Reversible round-trip max-absolute reconstruction error was **{r['reconstruction']['max_abs_error']:.2e}**."]
+    lines=[f"- At the same batch size, peak allocated memory changed by **{mem_delta:+.1f}%** for the selected reversible variant relative to baseline.",f"- Its same-batch throughput delta was **{speed:+.1f}%**.",f"- At the maximum reversible batch, throughput changed by **{maxspeed:+.1f}%** relative to the fixed-batch baseline.",f"- Fixed-batch validation-loss delta was **{val:+.4f}** (reversible − baseline).",f"- Reversible round-trip max-absolute reconstruction error was **{r['reconstruction']['max_abs_error']:.2e}**."]
     bp=probes.get('baseline_batch_probe');rp=probes.get('reversible_batch_probe')
     if bp and rp:
         lines.insert(2,f"- Maximum memory-feasible batch changed from **{bp['largest_stable_batch']} → {rp['largest_stable_batch']} sequences ({rp['largest_stable_batch']/bp['largest_stable_batch']:.2f}×)** under the same 10-update probe rule.")
+    lines.extend([
+        f"- Aggregate steady-state throughput (total measured tokens / total measured seconds) was **{b['aggregate_tokens_per_s']:,.0f}**, **{r['aggregate_tokens_per_s']:,.0f}**, and **{m['aggregate_tokens_per_s']:,.0f} tok/s** for baseline, reversible fixed, and reversible maximum batch respectively.",
+        f"- Reversible maximum-batch validation-loss delta against reversible fixed batch was **{m['final_val_loss']-r['final_val_loss']:+.4f}**; update counts were **{r['optimizer_steps']:,}** and **{m['optimizer_steps']:,}**.",
+        f"- Trained reversible fixed-batch reconstruction relative L2 error was **{r['reconstruction']['max_relative_l2_error']:.2e}**, measured at context **{r['reconstruction']['context_length']}** in **{r['precision']}**.",
+        f"- Overflow retries were **{b['overflow_retries']} / {r['overflow_retries']} / {m['overflow_retries']}**; recoveries were **{b['resume_count']} / {r['resume_count']} / {m['resume_count']}** (baseline / reversible fixed / reversible max)."
+    ])
     return '\n'.join(lines)
 
 def batch_probe_table(results_dir="results"):
@@ -133,6 +143,10 @@ def hardware_table(results):
             f"| Git commit | {h.get('git_commit')} |")
 
 def update_readme(readme_path='README.md',results_dir='results'):
+    from scripts.audit_results import audit
+    errors = audit(Path(readme_path).resolve().parent)
+    if errors:
+        raise RuntimeError("Report generation requires a passing evidence audit: " + "; ".join(errors))
     p=Path(readme_path);text=p.read_text();results=load_results(results_dir)
     reps={
         r'<!-- RESULTS_TABLE_START -->.*?<!-- RESULTS_TABLE_END -->':f"<!-- RESULTS_TABLE_START -->\n{markdown_table(results)}\n<!-- RESULTS_TABLE_END -->",
@@ -142,7 +156,7 @@ def update_readme(readme_path='README.md',results_dir='results'):
         r'<!-- QUALITATIVE_TABLE_START -->.*?<!-- QUALITATIVE_TABLE_END -->':f"<!-- QUALITATIVE_TABLE_START -->\n{qualitative_table(results)}\n<!-- QUALITATIVE_TABLE_END -->",
         r'<!-- HARDWARE_TABLE_START -->.*?<!-- HARDWARE_TABLE_END -->':f"<!-- HARDWARE_TABLE_START -->\n{hardware_table(results)}\n<!-- HARDWARE_TABLE_END -->",
     }
-    for pat,repl in reps.items(): text=re.sub(pat,repl,text,flags=re.S)
+    for pat,repl in reps.items(): text=re.sub(pat,lambda match, value=repl: value,text,flags=re.S)
     p.write_text(text);return results
 
 if __name__=='__main__':
