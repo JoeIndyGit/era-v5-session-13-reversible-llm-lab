@@ -10,6 +10,18 @@ No benchmark number is typed into the report by hand. The notebooks emit raw JSO
 
 ---
 
+## Start here — clean Colab path
+
+The canonical one-click notebook is:
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/JoeIndyGit/era-v5-session-13-reversible-llm-lab/blob/main/notebooks/06_one_click_colab_submission.ipynb)
+
+It now **clones or refreshes this repository automatically**, so it works from a blank Colab GPU runtime. For the full execution and evidence-preservation procedure, see [COLAB_RUNBOOK.md](COLAB_RUNBOOK.md).
+
+After the final evidence audit passes, `scripts/package_evidence.py` creates a compact `submission_evidence/era-v5-session-13-evidence.zip` plus a SHA-256 manifest. The large TinyStories caches are deliberately excluded.
+
+---
+
 ## Assignment → evidence map
 
 | Requirement | Evidence |
