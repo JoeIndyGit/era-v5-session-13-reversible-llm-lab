@@ -2,6 +2,7 @@ name: validate
 on:
   push:
   pull_request:
+
 jobs:
   correctness:
     runs-on: ubuntu-latest
@@ -10,5 +11,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install torch numpy
-      - run: python scripts/validate.py
+      - name: Install validation dependencies
+        run: pip install torch numpy
+      - name: Validate repository structure
+        run: python scripts/validate_repo_structure.py
+      - name: Validate reversible mathematics and token accounting
+        run: python scripts/validate.py
