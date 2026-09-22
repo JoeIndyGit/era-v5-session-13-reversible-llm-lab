@@ -1,0 +1,13 @@
+{
+  "vocab_size": 10000,
+  "seq_len": 256,
+  "d_model": 256,
+  "n_heads": 8,
+  "n_layers": 22,
+  "d_ff": 1024,
+  "dropout": 0.0,
+  "bias": true,
+  "reversible": true,
+  "reversible_variant": "midpoint",
+  "reversible_h": 0.25
+}
