@@ -41,3 +41,10 @@
 - [ ] GitHub Actions validate passes.
 - [ ] README images render.
 - [ ] Submit the repository/README link.
+
+## Final evidence bundle
+- [ ] Run `python scripts/package_evidence.py` only after the final audit passes.
+- [ ] `submission_evidence/MANIFEST.json` exists.
+- [ ] `submission_evidence/era-v5-session-13-evidence.zip` exists.
+- [ ] Preserve the printed ZIP SHA-256 alongside the submitted artifact.
+- [ ] Verify the bundle excludes `data/` caches and temporary checkpoints.
