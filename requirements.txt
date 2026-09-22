@@ -1,0 +1,8 @@
+torch>=2.5
+transformers>=4.45
+datasets>=3.0
+tokenizers>=0.20
+numpy>=1.26
+pandas>=2.2
+matplotlib>=3.8
+tqdm>=4.66
