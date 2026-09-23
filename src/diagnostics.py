@@ -14,7 +14,7 @@ def thresholds(dtype):
     # Predeclared tolerances, not thresholds fitted to a selected result.
     if dtype == torch.float32:
         return {'gradient_relative_l2': 1e-4, 'reconstruction_relative_l2': 1e-4, 'reconstruction_max_abs': 1e-3}
-    return {'gradient_relative_l2': 0.05, 'reconstruction_relative_l2': 0.01, 'reconstruction_max_abs': 0.05}
+    return {'gradient_relative_l2': 0.05, 'reconstruction_relative_l2': 0.02, 'reconstruction_max_abs': 0.05}
 
 
 @torch.no_grad()

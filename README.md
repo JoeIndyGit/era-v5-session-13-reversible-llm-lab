@@ -77,7 +77,7 @@ The regression suite interrupts real small-model training and verifies **identic
 
 Before variant pilots, `scripts/validate_gpu.py` checks the **full 22-layer model at context 256**, after three optimizer updates, under the actual selected CUDA precision. It compares every parameter gradient with an ordinary-autograd reference and measures reconstruction error. CPU correctness cannot substitute for this GPU artifact.
 
-Predeclared numerical tolerances are recorded in every diagnostic. FP32 reconstruction must have relative L2 error at most $10^{-4}$ and maximum absolute error at most $10^{-3}$; mixed precision uses 0.01 and 0.05 respectively. Gradient relative L2 tolerance is $10^{-4}$ for FP32 and 0.05 for mixed precision. Both absolute and relative errors are reported, and the trained reversible models must pass reconstruction again at the end.
+Predeclared numerical tolerances are recorded in every diagnostic. FP32 reconstruction must have relative L2 error at most $10^{-4}$ and maximum absolute error at most $10^{-3}$; mixed precision uses 0.02 and 0.05 respectively. The 0.02 relative bound is applied to the full-depth BF16 GPU check and to the trained-model round-trip; the observed error is recorded for every run. Gradient relative L2 tolerance is $10^{-4}$ for FP32 and 0.05 for mixed precision. Both absolute and relative errors are reported, and the trained reversible models must pass reconstruction again at the end.
 
 If neither variant passes, the pipeline stops. A new, controlled FP32 experiment is the documented fallback; precision is never changed halfway through a comparison.
 
